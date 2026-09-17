@@ -150,6 +150,8 @@ cp .env.example .env
 | `VISION_CONFIDENCE_THRESHOLD` | `0.60` | Ingredients below this confidence get `needs_confirmation: true` |
 | `MAX_IMAGE_SIZE_MB` | `10` | Reject images larger than this |
 | `DATABASE_URL` | `postgresql://postgres@localhost:5432/smart_fridge` | PostgreSQL connection string for inventory storage |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model for recipe search (section 11) |
+| `EMBEDDING_DIMENSIONS` | `768` | Must match the embedding model's actual output size |
 
 ## 8. Run it
 
@@ -219,6 +221,58 @@ hardcoded.
 | Response is slow | Vision models are compute-heavy. Performance depends heavily on your Mac's RAM/GPU (Apple Silicon with more unified memory will be noticeably faster). |
 | `Inventory not saved -- Could not connect to the inventory database` | PostgreSQL isn't running. Run `scripts/start_db.sh`. |
 
+## 11. Recipe search index (pgvector)
+
+pgvector is now actually used: a subset of a public recipe dataset is
+embedded and stored for similarity search, as groundwork for recipe RAG in
+a later phase. **No retriever/recommendation logic is wired up yet** --
+this section only loads and indexes the data.
+
+Dataset: [josephrmartinez/recipe-dataset](https://github.com/josephrmartinez/recipe-dataset)
+(13,501 recipes with title, ingredients, and instructions). The CSV isn't
+committed to this repo (25 MB, easily re-downloaded) -- fetch it yourself:
+
+```bash
+mkdir -p data/recipes
+curl -L -o data/recipes/13k-recipes.csv \
+  https://raw.githubusercontent.com/josephrmartinez/recipe-dataset/main/13k-recipes.csv
+```
+
+Pull the embedding model (small, ~274 MB, purpose-built for this -- not
+the vision model):
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Then build the index (creates tables if needed, embeds a reproducible
+random subset of 1,000 recipes, skips re-running if already populated):
+
+```bash
+python scripts/init_db.py
+python scripts/build_recipe_index.py
+```
+
+On this machine this took ~17 seconds for 1,000 recipes. Quick sanity
+check that the embeddings are actually meaningful (not part of the app --
+just a manual verification query):
+
+```bash
+python3 -c "
+from pgvector.psycopg2 import register_vector
+from app.inventory.inventory_service import get_connection
+from app.rag.embeddings import embed_text
+
+conn = get_connection()
+register_vector(conn)
+qvec = embed_text('chicken potato tomato onion dinner')
+with conn.cursor() as cur:
+    cur.execute('SELECT name, embedding <=> %s::vector AS distance FROM recipes ORDER BY embedding <=> %s::vector LIMIT 5', (qvec, qvec))
+    for name, distance in cur.fetchall():
+        print(f'{distance:.4f}  {name}')
+"
+```
+
 ## Known limitations (Phase 2)
 
 - **No deduplication across runs.** Each run appends detected ingredients
@@ -233,12 +287,21 @@ hardcoded.
   `VISION_CONFIDENCE_THRESHOLD`, but it never un-flags something the model
   already marked `true` at higher confidence -- over-flagging is the safe
   direction.
+- **The recipe index has no retriever yet.** 1,000 recipes are embedded and
+  searchable with raw SQL (section 11's sanity-check query), but nothing
+  in the app combines current inventory + meal period into a recipe
+  recommendation yet -- that's the next phase.
+- **The indexed recipes have no cuisine/meal-type/servings/vegetarian
+  metadata.** The source CSV doesn't include those fields, so the
+  `recipes` table has nullable columns for them, left empty for now rather
+  than guessed at.
 
 ## What's explicitly out of scope for this POC
 
 By design, this project still does **not** include: LangChain, LangGraph,
-CrewAI, MCP, RAG, agents, YOLO, FastAPI, or any external search/API
-integration. PostgreSQL and pgvector are now in place (pgvector is enabled
-but unused until recipe search is built in a later phase). The goal
-remains to add one real capability at a time rather than reaching for a
-framework before it's needed.
+CrewAI, MCP, RAG retrieval logic, agents, YOLO, FastAPI, or any external
+search/API integration. PostgreSQL and pgvector are in place and now hold
+1,000 embedded recipes (section 11), but nothing queries them as part of
+an actual recommendation flow yet. The goal remains to add one real
+capability at a time rather than reaching for a framework before it's
+needed.
