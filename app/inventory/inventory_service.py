@@ -77,6 +77,13 @@ def fetch_all(conn) -> list[InventoryRecord]:
     return [InventoryRecord.model_validate(dict(row)) for row in rows]
 
 
+def fetch_distinct_names(conn) -> list[str]:
+    """Distinct ingredient names currently in inventory, for building a recipe query."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT name FROM inventory ORDER BY name;")
+        return [row[0] for row in cur.fetchall()]
+
+
 def clear_all(conn) -> int:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM inventory;")

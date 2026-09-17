@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+import psycopg2.extras
 from pgvector.psycopg2 import register_vector
 
 from app.config import EMBEDDING_DIMENSIONS
@@ -61,3 +62,23 @@ def insert_recipe(conn, *, external_id: str, name: str, image_name: str,
             """,
             (external_id, name, image_name, json.dumps(ingredients), instructions, embedding),
         )
+
+
+def find_similar(conn, query_embedding: list[float], limit: int = 5):
+    """Nearest recipes to query_embedding by cosine distance (smaller = closer).
+
+    The explicit ::vector casts matter: without a known target column to
+    infer the type from, Postgres can't resolve `<=>` against a bare
+    parameter and raises "operator does not exist: vector <=> numeric[]".
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, name, instructions, embedding <=> %s::vector AS distance
+            FROM recipes
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (query_embedding, query_embedding, limit),
+        )
+        return cur.fetchall()

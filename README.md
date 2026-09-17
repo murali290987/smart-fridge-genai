@@ -3,19 +3,23 @@
 A minimal proof of concept that tests how accurately **Qwen3-VL 8B** (a
 local multimodal vision-language model, run through **Ollama**) can
 identify food ingredients from a photo of a refrigerator, then persists
-those ingredients as refrigerator inventory in **PostgreSQL** and reports
-the current meal period.
+those ingredients as refrigerator inventory in **PostgreSQL**, reports the
+current meal period, and suggests recipes by vector similarity search
+over an embedded recipe dataset (**pgvector**).
 
 Phase 1 was deliberately framework-free raw Python with no database. Phase
-2 adds the two smallest useful next steps -- inventory storage and
-meal-time detection -- while still avoiding RAG, agents, and FastAPI until
-those are actually needed.
+2 adds inventory storage, meal-time detection, and a minimal recipe RAG
+retriever -- while still avoiding agents and FastAPI until those are
+actually needed.
 
 ```
 fridge.jpg -> Python -> Ollama -> Qwen3-VL 8B -> structured JSON
     -> Pydantic validation -> PostgreSQL inventory -> console
 
 local system time -> deterministic Python -> current meal period
+
+inventory + meal period -> text query -> Ollama embedding -> pgvector
+    cosine search over indexed recipes -> ranked recipe suggestions
 ```
 
 ## 1. What this POC does
@@ -34,6 +38,9 @@ local system time -> deterministic Python -> current meal period
 7. Prints the validated ingredient list, the full persisted inventory, and
    the current meal period (breakfast/lunch/snacks/dinner/other) computed
    deterministically from local system time -- not from the LLM.
+8. Builds a text query from current inventory + meal period, embeds it,
+   and prints the 5 nearest recipes from the pgvector index (section 11)
+   by cosine similarity -- retrieval only, no LLM-generated explanation.
 
 Qwen3-VL is a **vision-language model**: it can take both an image and a
 text prompt as input and reason about what's in the image in natural
@@ -189,8 +196,9 @@ python main.py
 }
 ```
 
-After the ingredient JSON, you'll also see the full persisted inventory and
-the current meal period, e.g.:
+After the ingredient JSON, you'll also see the full persisted inventory,
+the current meal period, and (if the recipe index from section 11 has
+been built) recipe suggestions, e.g.:
 
 ```
 Saved 13 ingredient(s) to inventory (source=vision).
@@ -202,6 +210,13 @@ Full inventory (13 row(s), persisted across runs):
   ...
 
 Current meal period: {"meal_period":"dinner","current_time":"19:42","timezone":"local"}
+
+Recipe suggestions for dinner based on current inventory (nearest by embedding distance):
+
+  1. Radicchio and Apple Salad with Parmesan Crisps (distance=0.3383)
+     Preheat oven to 350°F. On a silicone mat-lined baking sheet...
+  2. Mulled Pears and Apples (distance=0.3441)
+     Fill a large, heavy pot with apple juice. Tie the cinnamon sticks...
 ```
 
 The actual ingredients, quantities, and confidence scores depend entirely
@@ -220,13 +235,13 @@ hardcoded.
 | `Model returned an invalid response` | The model didn't return valid JSON matching the schema. Usually transient -- re-run. Consistent failures may mean the model needs a lower `temperature` or a reworded prompt. |
 | Response is slow | Vision models are compute-heavy. Performance depends heavily on your Mac's RAM/GPU (Apple Silicon with more unified memory will be noticeably faster). |
 | `Inventory not saved -- Could not connect to the inventory database` | PostgreSQL isn't running. Run `scripts/start_db.sh`. |
+| `No recipe suggestions -- run scripts/build_recipe_index.py first.` | The `recipes` table is empty. Follow section 11. |
 
 ## 11. Recipe search index (pgvector)
 
-pgvector is now actually used: a subset of a public recipe dataset is
-embedded and stored for similarity search, as groundwork for recipe RAG in
-a later phase. **No retriever/recommendation logic is wired up yet** --
-this section only loads and indexes the data.
+A subset of a public recipe dataset is embedded and stored for similarity
+search. `main.py` uses it automatically (step 8 above) -- this section
+covers how the index itself is built.
 
 Dataset: [josephrmartinez/recipe-dataset](https://github.com/josephrmartinez/recipe-dataset)
 (13,501 recipes with title, ingredients, and instructions). The CSV isn't
@@ -273,6 +288,21 @@ with conn.cursor() as cur:
 "
 ```
 
+## 12. How recipe suggestions are built
+
+`app/rag/recipe_retriever.py` is the actual "Recipe RAG" piece:
+
+1. Reads distinct ingredient names from the `inventory` table.
+2. Gets the current meal period (section 4's meal-time logic).
+3. Joins them into one text query, e.g. `"apple banana egg milk tomato dinner"`.
+4. Embeds that query with the same `nomic-embed-text` model used for indexing.
+5. Runs a pgvector cosine-similarity search (`<=>` operator) against the
+   `recipes` table and returns the closest matches.
+
+This is retrieval only -- an LLM never ranks or explains the results, and
+there's no filtering by cuisine/diet/cook-time (the dataset doesn't have
+that metadata; see limitations below).
+
 ## Known limitations (Phase 2)
 
 - **No deduplication across runs.** Each run appends detected ingredients
@@ -287,21 +317,22 @@ with conn.cursor() as cur:
   `VISION_CONFIDENCE_THRESHOLD`, but it never un-flags something the model
   already marked `true` at higher confidence -- over-flagging is the safe
   direction.
-- **The recipe index has no retriever yet.** 1,000 recipes are embedded and
-  searchable with raw SQL (section 11's sanity-check query), but nothing
-  in the app combines current inventory + meal period into a recipe
-  recommendation yet -- that's the next phase.
 - **The indexed recipes have no cuisine/meal-type/servings/vegetarian
   metadata.** The source CSV doesn't include those fields, so the
   `recipes` table has nullable columns for them, left empty for now rather
-  than guessed at.
+  than guessed at -- recipe suggestions can't be filtered by diet or
+  cook-time yet, only ranked by embedding similarity.
+- **The retriever is retrieval-only, not a recommendation engine.** It
+  finds the nearest recipes by vector distance; it doesn't check whether
+  you actually have *all* the ingredients a recipe needs, weigh
+  `needs_confirmation` items differently, or explain *why* a recipe was
+  suggested. An LLM-based ranking/explanation step is a further phase.
 
 ## What's explicitly out of scope for this POC
 
 By design, this project still does **not** include: LangChain, LangGraph,
-CrewAI, MCP, RAG retrieval logic, agents, YOLO, FastAPI, or any external
-search/API integration. PostgreSQL and pgvector are in place and now hold
-1,000 embedded recipes (section 11), but nothing queries them as part of
-an actual recommendation flow yet. The goal remains to add one real
-capability at a time rather than reaching for a framework before it's
-needed.
+CrewAI, MCP, an LLM-based agent with tool-calling, YOLO, FastAPI, or any
+external search/API integration. Retrieval (section 12) is now real and
+working, but recipe ranking/explanation and multi-step agent behavior are
+still out of scope. The goal remains to add one real capability at a time
+rather than reaching for a framework before it's needed.

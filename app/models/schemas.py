@@ -54,3 +54,10 @@ class MealPeriodInfo(BaseModel):
     meal_period: MealPeriod
     current_time: str
     timezone: str = "local"
+
+
+class RecipeRecommendation(BaseModel):
+    id: int
+    name: str
+    distance: float
+    instructions_preview: str

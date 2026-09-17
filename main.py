@@ -26,6 +26,7 @@ from app.inventory.inventory_service import (
     save_ingredients,
 )
 from app.meal_time.detector import detect_meal_period
+from app.rag.recipe_retriever import recommend_recipes
 from app.vision.image_processor import ImageValidationError, validate_image
 from app.vision.ollama_vision import (
     InvalidModelResponseError,
@@ -91,11 +92,21 @@ def main() -> int:
             flag = " [NEEDS CONFIRMATION]" if row.needs_confirmation else ""
             print(f"  #{row.id} {row.name}: {row.estimated_quantity} {row.unit} "
                   f"(conf={row.confidence}, source={row.source}){flag}")
+
+        meal_info = detect_meal_period()
+        print(f"\nCurrent meal period: {meal_info.model_dump_json()}")
+
+        recommendations = recommend_recipes(conn)
+        if recommendations:
+            print(f"\nRecipe suggestions for {meal_info.meal_period.value} "
+                  f"based on current inventory (nearest by embedding distance):\n")
+            for rank, rec in enumerate(recommendations, start=1):
+                print(f"  {rank}. {rec.name} (distance={rec.distance:.4f})")
+                print(f"     {rec.instructions_preview}")
+        else:
+            print("\nNo recipe suggestions -- run scripts/build_recipe_index.py first.")
     finally:
         conn.close()
-
-    meal_info = detect_meal_period()
-    print(f"\nCurrent meal period: {meal_info.model_dump_json()}")
 
     return 0
 
