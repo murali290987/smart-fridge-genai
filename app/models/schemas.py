@@ -1,5 +1,8 @@
-"""Pydantic models for validating Qwen3-VL's ingredient detection output."""
+"""Pydantic models shared across the vision, inventory, and meal-time modules."""
 from __future__ import annotations
+
+import datetime as dt
+from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -23,3 +26,31 @@ class Ingredient(BaseModel):
 
 class IngredientDetectionResponse(BaseModel):
     ingredients: list[Ingredient]
+
+
+class InventoryRecord(BaseModel):
+    """A single row from the `inventory` table (PostgreSQL)."""
+
+    id: int
+    name: str
+    estimated_quantity: str
+    unit: str
+    confidence: float
+    needs_confirmation: bool
+    source: str
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class MealPeriod(str, Enum):
+    breakfast = "breakfast"
+    lunch = "lunch"
+    snacks = "snacks"
+    dinner = "dinner"
+    other = "other"
+
+
+class MealPeriodInfo(BaseModel):
+    meal_period: MealPeriod
+    current_time: str
+    timezone: str = "local"

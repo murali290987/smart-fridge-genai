@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Smart Fridge GenAI POC -- Phase 1
+Smart Fridge GenAI POC -- Phase 2
 
 Pipeline:
-    fridge.jpg -> Python -> Ollama -> Qwen3-VL 8B -> structured JSON -> console
+    fridge.jpg -> Python -> Ollama -> Qwen3-VL 8B -> structured JSON
+        -> Pydantic validation -> PostgreSQL inventory -> console
+
+Also reports the current meal period (breakfast/lunch/snacks/dinner/other)
+from local system time -- deterministic Python, not an LLM call.
 
 Run:
     python main.py
@@ -14,6 +18,14 @@ import sys
 from pathlib import Path
 
 from app.config import OLLAMA_BASE_URL, OLLAMA_VISION_MODEL
+from app.inventory.inventory_service import (
+    InventoryDatabaseError,
+    ensure_schema,
+    fetch_all,
+    get_connection,
+    save_ingredients,
+)
+from app.meal_time.detector import detect_meal_period
 from app.vision.image_processor import ImageValidationError, validate_image
 from app.vision.ollama_vision import (
     InvalidModelResponseError,
@@ -61,6 +73,30 @@ def main() -> int:
 
     print("\nDetected ingredients:\n")
     print(result.model_dump_json(indent=2))
+
+    try:
+        conn = get_connection()
+    except InventoryDatabaseError as exc:
+        print(f"\nInventory not saved -- {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        ensure_schema(conn)
+        saved = save_ingredients(conn, result.ingredients)
+        print(f"\nSaved {saved} ingredient(s) to inventory (source=vision).")
+
+        inventory = fetch_all(conn)
+        print(f"\nFull inventory ({len(inventory)} row(s), persisted across runs):\n")
+        for row in inventory:
+            flag = " [NEEDS CONFIRMATION]" if row.needs_confirmation else ""
+            print(f"  #{row.id} {row.name}: {row.estimated_quantity} {row.unit} "
+                  f"(conf={row.confidence}, source={row.source}){flag}")
+    finally:
+        conn.close()
+
+    meal_info = detect_meal_period()
+    print(f"\nCurrent meal period: {meal_info.model_dump_json()}")
+
     return 0
 
 
