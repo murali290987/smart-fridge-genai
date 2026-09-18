@@ -53,22 +53,26 @@ Rules:
 3. Use simple, common food ingredient names such as:
    potato, tomato, onion, carrot, cucumber, capsicum, chicken, egg, milk, bread, spinach, etc.
 4. Count clearly visible individual items when practical.
-5. If the quantity cannot reasonably be determined from the image, use:
+5. When counting items of the same type, look carefully for ones that overlap, touch, or rest against
+   each other (e.g. two oranges leaning together, apples stacked in a bowl). Count each distinct item
+   separately even when partially hidden behind another item of the same type -- do not collapse two
+   overlapping items into a count of one.
+6. If the quantity cannot reasonably be determined from the image, use:
    "unknown"
-6. Quantity estimates are approximate and must NOT be treated as exact.
-7. Do not estimate exact weight in grams or kilograms unless the weight is explicitly visible in the image.
-8. Do not determine freshness, expiry date, quality, or food safety from the image.
-9. If an ingredient is partially visible but can reasonably be identified, include it with an appropriate confidence score.
-10. If an ingredient is too unclear to identify reliably, do not include it.
-11. If the same ingredient appears multiple times, combine them into one entry when practical.
-12. Confidence represents how confident you are that the identified ingredient is actually present.
-13. Confidence must be a number between 0.0 and 1.0.
-14. Set "needs_confirmation" to true when confidence is below 0.60.
-15. Set "needs_confirmation" to false when confidence is 0.60 or higher.
-16. Do not use the example values below as actual image results. Analyze the provided image independently.
-17. Return valid JSON only.
-18. Do not include Markdown code fences.
-19. Do not include explanations, comments, or additional text outside the JSON.
+7. Quantity estimates are approximate and must NOT be treated as exact.
+8. Do not estimate exact weight in grams or kilograms unless the weight is explicitly visible in the image.
+9. Do not determine freshness, expiry date, quality, or food safety from the image.
+10. If an ingredient is partially visible but can reasonably be identified, include it with an appropriate confidence score.
+11. If an ingredient is too unclear to identify reliably, do not include it.
+12. If the same ingredient appears multiple times, combine them into one entry when practical.
+13. Confidence represents how confident you are that the identified ingredient is actually present.
+14. Confidence must be a number between 0.0 and 1.0.
+15. Set "needs_confirmation" to true when confidence is below 0.60.
+16. Set "needs_confirmation" to false when confidence is 0.60 or higher.
+17. Do not use the example values below as actual image results. Analyze the provided image independently.
+18. Return valid JSON only.
+19. Do not include Markdown code fences.
+20. Do not include explanations, comments, or additional text outside the JSON.
 
 Return exactly this JSON structure:
 
