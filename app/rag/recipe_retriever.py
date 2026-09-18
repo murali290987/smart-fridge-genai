@@ -14,7 +14,7 @@ from app.models.schemas import RecipeRecommendation
 from app.rag.embeddings import embed_text
 from app.rag.recipe_store import count, find_similar
 
-INSTRUCTIONS_PREVIEW_LENGTH = 160
+INSTRUCTIONS_PREVIEW_LENGTH = 400
 
 
 def build_query_text(ingredient_names: list[str], meal_period: str) -> str:
