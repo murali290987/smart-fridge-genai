@@ -36,6 +36,42 @@ def normalize_ingredient_name(name: str) -> str:
     return normalized or name.strip()  # never reduce a name to nothing
 
 
+def _try_parse_count(value: str) -> int | None:
+    try:
+        return int(value.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _merge_same_name_ingredients(a: Ingredient, b: Ingredient) -> Ingredient:
+    """
+    Combine two detections that normalized to the same name (e.g. "apple"
+    and "red apple" both seen in one photo -- two real, distinct apples).
+
+    Sums quantities when both are plain integers and units roughly match
+    (ignoring plural "s"); otherwise falls back to the higher-confidence
+    entry's quantity/unit, since the two can't be cleanly added (e.g. one
+    is "unknown" or the units differ, like "piece" vs "bunch").
+    """
+    count_a, count_b = _try_parse_count(a.estimated_quantity), _try_parse_count(b.estimated_quantity)
+    same_unit = a.unit.strip().lower().rstrip("s") == b.unit.strip().lower().rstrip("s")
+
+    if count_a is not None and count_b is not None and same_unit:
+        estimated_quantity = str(count_a + count_b)
+        unit = a.unit
+    else:
+        better = a if a.confidence >= b.confidence else b
+        estimated_quantity, unit = better.estimated_quantity, better.unit
+
+    return Ingredient(
+        name=a.name,
+        estimated_quantity=estimated_quantity,
+        unit=unit,
+        confidence=max(a.confidence, b.confidence),
+        needs_confirmation=a.needs_confirmation or b.needs_confirmation,
+    )
+
+
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS inventory (
     id SERIAL PRIMARY KEY,
@@ -86,14 +122,17 @@ def save_ingredients(conn, ingredients: list[Ingredient], source: str = "vision"
     if not ingredients:
         return 0
 
-    # Normalize first, then dedup: two entries that normalize to the same
+    # Normalize first, then merge: two entries that normalize to the same
     # name (e.g. "apple" and "red apple") would otherwise violate ON
     # CONFLICT's "cannot affect row a second time in one command" rule --
-    # keep the last occurrence.
-    deduped: dict[str, tuple[str, Ingredient]] = {}
+    # and simply keeping one would silently drop a real, distinct item's
+    # count, so combine them instead (see _merge_same_name_ingredients).
+    deduped: dict[str, Ingredient] = {}
     for ing in ingredients:
         normalized_name = normalize_ingredient_name(ing.name)
-        deduped[normalized_name.lower()] = (normalized_name, ing)
+        renamed = ing.model_copy(update={"name": normalized_name})
+        key = normalized_name.lower()
+        deduped[key] = _merge_same_name_ingredients(deduped[key], renamed) if key in deduped else renamed
 
     with conn.cursor() as cur:
         psycopg2.extras.execute_values(
@@ -111,8 +150,8 @@ def save_ingredients(conn, ingredients: list[Ingredient], source: str = "vision"
                 updated_at = now()
             """,
             [
-                (normalized_name, ing.estimated_quantity, ing.unit, ing.confidence, ing.needs_confirmation, source)
-                for normalized_name, ing in deduped.values()
+                (ing.name, ing.estimated_quantity, ing.unit, ing.confidence, ing.needs_confirmation, source)
+                for ing in deduped.values()
             ],
         )
     conn.commit()

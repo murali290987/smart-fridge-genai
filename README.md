@@ -323,6 +323,12 @@ that metadata; see limitations below).
   apple", but will also merge genuinely distinct items sharing a base word
   -- e.g. "green onion" and "onion" become one row, losing a real
   distinction. Edit `_DESCRIPTIVE_WORDS` if a specific case matters to you.
+  When two entries in the *same* photo normalize to the same name (e.g.
+  one red apple + one green apple), `_merge_same_name_ingredients()` sums
+  their quantities (1 + 1 = 2) rather than silently keeping only one --
+  but only when both quantities are plain integers with matching units;
+  otherwise it falls back to the higher-confidence entry's quantity/unit,
+  since e.g. "unknown" and "2" or "piece" and "bag" can't be added.
 - **`needs_confirmation` isn't always reliable from the model itself.**
   The Pydantic validator force-flags anything below
   `VISION_CONFIDENCE_THRESHOLD`, but it never un-flags something the model
