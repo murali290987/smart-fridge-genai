@@ -32,9 +32,10 @@ inventory + meal period -> text query -> Ollama embedding -> pgvector
 5. Validates that JSON against a Pydantic schema (rejecting malformed
    output, enforcing `0.0 <= confidence <= 1.0`, and flagging
    low-confidence ingredients rather than silently dropping them).
-6. Saves each detected ingredient as a new row in the `inventory` table in
-   PostgreSQL (append-only -- it does not merge/dedupe against previous
-   runs; see "Known limitations" below).
+6. Upserts each detected ingredient into the `inventory` table in
+   PostgreSQL, keyed by case-insensitive name -- re-detecting an ingredient
+   updates its existing row rather than duplicating it (see "Known
+   limitations" below for what this does and doesn't handle).
 7. Prints the validated ingredient list, the full persisted inventory, and
    the current meal period (breakfast/lunch/snacks/dinner/other) computed
    deterministically from local system time -- not from the LLM.
@@ -305,10 +306,14 @@ that metadata; see limitations below).
 
 ## Known limitations (Phase 2)
 
-- **No deduplication across runs.** Each run appends detected ingredients
-  as new inventory rows; it does not merge "3 tomatoes" from yesterday with
-  "1 tomato" from today. That's a deliberate next step, not implemented
-  here to keep this phase's scope small.
+- **Re-detecting an ingredient updates it in place, it doesn't remove
+  stale ones.** Inventory is upserted by case-insensitive name (a unique
+  index on `LOWER(name)`) -- re-running on the same fridge photo refreshes
+  quantity/confidence/`updated_at` for ingredients still detected, rather
+  than piling up duplicate rows. But if an ingredient disappears from a
+  later photo (used up, thrown out), its row is simply never touched again
+  -- nothing removes or expires it. A "last seen" timestamp already exists
+  (`updated_at`) for a future staleness check; nothing acts on it yet.
 - **The model doesn't always merge duplicates within a single response**
   either (e.g. "apple" and "red apple" as separate entries), despite the
   prompt asking it to -- a model accuracy limitation, not a code bug.
