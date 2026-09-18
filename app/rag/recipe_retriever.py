@@ -14,8 +14,6 @@ from app.models.schemas import RecipeRecommendation
 from app.rag.embeddings import embed_text
 from app.rag.recipe_store import count, find_similar
 
-INSTRUCTIONS_PREVIEW_LENGTH = 400
-
 
 def build_query_text(ingredient_names: list[str], meal_period: str) -> str:
     return f"{' '.join(ingredient_names)} {meal_period}".strip()
@@ -47,7 +45,7 @@ def recommend_recipes(conn, limit: int = 5) -> list[RecipeRecommendation]:
             id=row["id"],
             name=row["name"],
             distance=row["distance"],
-            instructions_preview=row["instructions"][:INSTRUCTIONS_PREVIEW_LENGTH].strip() + "...",
+            instructions=row["instructions"],
         )
         for row in rows
     ]

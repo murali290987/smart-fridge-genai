@@ -60,4 +60,4 @@ class RecipeRecommendation(BaseModel):
     id: int
     name: str
     distance: float
-    instructions_preview: str
+    instructions: str

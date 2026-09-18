@@ -102,7 +102,9 @@ def main() -> int:
                   f"based on current inventory (nearest by embedding distance):\n")
             for rank, rec in enumerate(recommendations, start=1):
                 print(f"  {rank}. {rec.name} (distance={rec.distance:.4f})")
-                print(f"     {rec.instructions_preview}")
+                for line in rec.instructions.strip().splitlines():
+                    print(f"     {line}")
+                print()
         else:
             print("\nNo recipe suggestions -- run scripts/build_recipe_index.py first.")
     finally:
