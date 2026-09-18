@@ -19,14 +19,22 @@ def build_query_text(ingredient_names: list[str], meal_period: str) -> str:
     return f"{' '.join(ingredient_names)} {meal_period}".strip()
 
 
-def recommend_recipes(conn, limit: int = 5) -> list[RecipeRecommendation]:
+def recommend_recipes(conn, limit: int = 5, *, vegetarian: bool | None = None,
+                       cuisine: str | None = None,
+                       max_cook_time_minutes: int | None = None) -> list[RecipeRecommendation]:
     """
     Returns up to `limit` recipes whose embedding is closest to a query
     built from current inventory + the current meal period.
 
-    Returns an empty list if there's no inventory yet or the recipe index
-    hasn't been built (callers should check for that and message the user
-    accordingly rather than treating it as an error).
+    The optional filters (vegetarian/cuisine/max_cook_time_minutes) only
+    affect rows that have that metadata -- most recipes from the first
+    dataset don't (see README), so they're excluded by vegetarian= or
+    max_cook_time_minutes= filters but not by leaving them unset.
+
+    Returns an empty list if there's no inventory yet, the recipe index
+    hasn't been built, or the filters excluded every match -- callers
+    should check for that and message the user accordingly rather than
+    treating it as an error.
     """
     if count(conn) == 0:
         return []
@@ -39,7 +47,10 @@ def recommend_recipes(conn, limit: int = 5) -> list[RecipeRecommendation]:
     query_text = build_query_text(ingredient_names, meal_period)
     query_embedding = embed_text(query_text)
 
-    rows = find_similar(conn, query_embedding, limit=limit)
+    rows = find_similar(
+        conn, query_embedding, limit=limit,
+        vegetarian=vegetarian, cuisine=cuisine, max_cook_time_minutes=max_cook_time_minutes,
+    )
     return [
         RecipeRecommendation(
             id=row["id"],

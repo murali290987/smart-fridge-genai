@@ -78,21 +78,56 @@ def insert_recipe(conn, *, external_id: str, name: str, image_name: str | None,
         )
 
 
-def find_similar(conn, query_embedding: list[float], limit: int = 5):
+def find_similar(conn, query_embedding: list[float], limit: int = 5, *,
+                  vegetarian: bool | None = None, cuisine: str | None = None,
+                  max_cook_time_minutes: int | None = None):
     """Nearest recipes to query_embedding by cosine distance (smaller = closer).
 
     The explicit ::vector casts matter: without a known target column to
     infer the type from, Postgres can't resolve `<=>` against a bare
     parameter and raises "operator does not exist: vector <=> numeric[]".
+
+    Optional filters only apply to rows that actually have that metadata
+    (most rows from the first recipe dataset don't -- see README) and are
+    combined with AND. A recipe with a NULL cooking_time_minutes is never
+    excluded by max_cook_time_minutes, since NULL means "unknown", not
+    "zero minutes".
     """
+    where_clauses = []
+    params: dict = {"qvec": query_embedding, "limit": limit}
+
+    if vegetarian is not None:
+        where_clauses.append("vegetarian = %(vegetarian)s")
+        params["vegetarian"] = vegetarian
+    if cuisine:
+        where_clauses.append("cuisine ILIKE %(cuisine)s")
+        params["cuisine"] = f"%{cuisine}%"
+    if max_cook_time_minutes is not None:
+        where_clauses.append("(cooking_time_minutes IS NULL OR cooking_time_minutes <= %(max_cook_time)s)")
+        params["max_cook_time"] = max_cook_time_minutes
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        if where_clauses:
+            # The HNSW index does an approximate search and only explores a
+            # small candidate window before Postgres applies the WHERE
+            # filter -- if none of that window matches the filter, the
+            # query can return zero rows even when many matches exist
+            # elsewhere in the table (confirmed via EXPLAIN: "Filter: (NOT
+            # vegetarian)" applied after the index scan). At this table's
+            # size (a few thousand rows), forcing an exact scan for
+            # filtered queries is cheap and guarantees correct results.
+            # SET LOCAL only affects the current transaction.
+            cur.execute("SET LOCAL enable_indexscan = off;")
         cur.execute(
-            """
-            SELECT id, name, instructions, embedding <=> %s::vector AS distance
+            f"""
+            SELECT id, name, instructions, embedding <=> %(qvec)s::vector AS distance
             FROM recipes
-            ORDER BY embedding <=> %s::vector
-            LIMIT %s
+            {where_sql}
+            ORDER BY embedding <=> %(qvec)s::vector
+            LIMIT %(limit)s
             """,
-            (query_embedding, query_embedding, limit),
+            params,
         )
         return cur.fetchall()

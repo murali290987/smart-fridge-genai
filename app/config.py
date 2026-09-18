@@ -33,3 +33,19 @@ MAX_IMAGE_SIZE_MB = float(os.environ.get("MAX_IMAGE_SIZE_MB", "10"))
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres@localhost:5432/smart_fridge")
 OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 EMBEDDING_DIMENSIONS = int(os.environ.get("EMBEDDING_DIMENSIONS", "768"))
+
+
+def _optional_bool(name: str) -> bool | None:
+    value = os.environ.get(name, "").strip()
+    return value.lower() in ("1", "true", "yes") if value else None
+
+
+def _optional_int(name: str) -> int | None:
+    value = os.environ.get(name, "").strip()
+    return int(value) if value else None
+
+
+# All unset (empty/absent) by default -- no filtering, same behavior as before.
+RECIPE_VEGETARIAN_ONLY = _optional_bool("RECIPE_VEGETARIAN_ONLY")
+RECIPE_CUISINE_FILTER = os.environ.get("RECIPE_CUISINE_FILTER", "").strip() or None
+RECIPE_MAX_COOK_TIME_MINUTES = _optional_int("RECIPE_MAX_COOK_TIME_MINUTES")

@@ -17,7 +17,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_VISION_MODEL
+from app.config import (
+    OLLAMA_BASE_URL,
+    OLLAMA_VISION_MODEL,
+    RECIPE_CUISINE_FILTER,
+    RECIPE_MAX_COOK_TIME_MINUTES,
+    RECIPE_VEGETARIAN_ONLY,
+)
 from app.inventory.inventory_service import (
     InventoryDatabaseError,
     ensure_schema,
@@ -96,15 +102,33 @@ def main() -> int:
         meal_info = detect_meal_period()
         print(f"\nCurrent meal period: {meal_info.model_dump_json()}")
 
-        recommendations = recommend_recipes(conn)
+        recommendations = recommend_recipes(
+            conn,
+            vegetarian=RECIPE_VEGETARIAN_ONLY,
+            cuisine=RECIPE_CUISINE_FILTER,
+            max_cook_time_minutes=RECIPE_MAX_COOK_TIME_MINUTES,
+        )
+
+        active_filters = []
+        if RECIPE_VEGETARIAN_ONLY is not None:
+            active_filters.append(f"vegetarian={RECIPE_VEGETARIAN_ONLY}")
+        if RECIPE_CUISINE_FILTER:
+            active_filters.append(f"cuisine~'{RECIPE_CUISINE_FILTER}'")
+        if RECIPE_MAX_COOK_TIME_MINUTES is not None:
+            active_filters.append(f"cook_time<={RECIPE_MAX_COOK_TIME_MINUTES}min")
+        filter_note = f" [filters: {', '.join(active_filters)}]" if active_filters else ""
+
         if recommendations:
             print(f"\nRecipe suggestions for {meal_info.meal_period.value} "
-                  f"based on current inventory (nearest by embedding distance):\n")
+                  f"based on current inventory{filter_note} (nearest by embedding distance):\n")
             for rank, rec in enumerate(recommendations, start=1):
                 print(f"  {rank}. {rec.name} (distance={rec.distance:.4f})")
                 for line in rec.instructions.strip().splitlines():
                     print(f"     {line}")
                 print()
+        elif active_filters:
+            print(f"\nNo recipe suggestions matched filters{filter_note} -- "
+                  "try loosening them (edit .env) or clearing them.")
         else:
             print("\nNo recipe suggestions -- run scripts/build_recipe_index.py first.")
     finally:

@@ -335,11 +335,36 @@ content, so those are left `NULL` rather than guessed -- see
 3. Joins them into one text query, e.g. `"apple banana egg milk tomato dinner"`.
 4. Embeds that query with the same `nomic-embed-text` model used for indexing.
 5. Runs a pgvector cosine-similarity search (`<=>` operator) against the
-   `recipes` table and returns the closest matches.
+   `recipes` table, optionally filtered, and returns the closest matches.
 
-This is retrieval only -- an LLM never ranks or explains the results, and
-there's no filtering by cuisine/diet/cook-time (the dataset doesn't have
-that metadata; see limitations below).
+This is retrieval only -- an LLM never ranks or explains the results.
+
+**Optional filters** (blank/unset by default -- no behavior change), set in `.env`:
+
+| Variable | Example | Effect |
+|---|---|---|
+| `RECIPE_VEGETARIAN_ONLY` | `true` | Only rows with `vegetarian = true` (or `false` for non-veg only) |
+| `RECIPE_CUISINE_FILTER` | `Indian` | Only rows where `cuisine` contains this text (case-insensitive) |
+| `RECIPE_MAX_COOK_TIME_MINUTES` | `30` | Excludes rows with a known cook time over this; rows with no cook time recorded are never excluded |
+
+Filters only affect rows that actually have that metadata -- every row
+from section 11a has it, every row from section 11 doesn't (see its
+Known limitations entry). If a filter excludes every match, `main.py`
+says so explicitly rather than telling you to rebuild the index.
+
+**A real bug found and fixed here, worth knowing if you touch this code:**
+combining a WHERE filter with the HNSW vector index can silently return
+*zero* rows even when hundreds of matches exist. `EXPLAIN` on a filtered
+query showed Postgres running the approximate HNSW index scan first and
+applying `Filter: (NOT vegetarian)` *after* -- since HNSW only explores a
+small candidate window, if none of that window happens to match the
+filter, everything gets filtered out despite matches existing elsewhere
+in the table. Fixed in `find_similar()` by forcing an exact scan
+(`SET LOCAL enable_indexscan = off`) whenever a filter is present -- cheap
+and fully correct at this table's size (a few thousand rows), though it
+wouldn't scale to a much larger corpus without a different approach (e.g.
+pgvector's per-query `hnsw.ef_search` tuning, or a partial index per
+filter value).
 
 ## Known limitations (Phase 2)
 
