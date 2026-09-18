@@ -1,11 +1,10 @@
 """
 Persists detected ingredients to PostgreSQL as refrigerator inventory.
 
-Plain SQL through psycopg2 -- no ORM. Re-detecting an ingredient that's
-already in inventory (case-insensitive name match) updates that row
-(quantity, confidence, updated_at) instead of inserting a duplicate. This
-does not merge near-duplicates like "apple" and "red apple" -- that's the
-model's own naming inconsistency, not something a DB-level key can fix.
+Plain SQL through psycopg2 -- no ORM. Names are normalized (descriptive
+words stripped) before matching, and re-detecting an ingredient updates
+its existing row (quantity, confidence, updated_at) instead of inserting
+a duplicate.
 """
 from __future__ import annotations
 
@@ -14,6 +13,28 @@ import psycopg2.extras
 
 from app.config import DATABASE_URL
 from app.models.schemas import Ingredient, InventoryRecord
+
+# Stripped before matching so e.g. "red apple" and "apple" merge into one
+# inventory row. Deliberately narrow: color words are included because
+# that's the case actually seen in testing (the model alternates between
+# "apple" and "red apple" for the same fruit run to run), but this will
+# also merge genuinely distinct items that happen to share a base word --
+# e.g. "green onion" and "onion" become the same row, which loses a real
+# distinction. Edit this set if a specific case matters to you.
+_DESCRIPTIVE_WORDS = {
+    "red", "green", "yellow", "purple", "white", "black", "brown",
+    "ripe", "unripe", "overripe", "fresh", "raw", "whole",
+    "large", "small", "medium", "big", "little",
+    "organic", "baby", "young",
+}
+
+
+def normalize_ingredient_name(name: str) -> str:
+    """Strip descriptive words for inventory matching/storage (see _DESCRIPTIVE_WORDS)."""
+    words = [w for w in name.strip().split() if w.lower() not in _DESCRIPTIVE_WORDS]
+    normalized = " ".join(words).strip()
+    return normalized or name.strip()  # never reduce a name to nothing
+
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS inventory (
@@ -65,10 +86,14 @@ def save_ingredients(conn, ingredients: list[Ingredient], source: str = "vision"
     if not ingredients:
         return 0
 
-    # Two entries with the same name (case-insensitive) in one response
-    # would otherwise violate ON CONFLICT's "cannot affect row a second
-    # time in one command" rule -- keep the last occurrence.
-    deduped: dict[str, Ingredient] = {ing.name.strip().lower(): ing for ing in ingredients}
+    # Normalize first, then dedup: two entries that normalize to the same
+    # name (e.g. "apple" and "red apple") would otherwise violate ON
+    # CONFLICT's "cannot affect row a second time in one command" rule --
+    # keep the last occurrence.
+    deduped: dict[str, tuple[str, Ingredient]] = {}
+    for ing in ingredients:
+        normalized_name = normalize_ingredient_name(ing.name)
+        deduped[normalized_name.lower()] = (normalized_name, ing)
 
     with conn.cursor() as cur:
         psycopg2.extras.execute_values(
@@ -86,8 +111,8 @@ def save_ingredients(conn, ingredients: list[Ingredient], source: str = "vision"
                 updated_at = now()
             """,
             [
-                (ing.name, ing.estimated_quantity, ing.unit, ing.confidence, ing.needs_confirmation, source)
-                for ing in deduped.values()
+                (normalized_name, ing.estimated_quantity, ing.unit, ing.confidence, ing.needs_confirmation, source)
+                for normalized_name, ing in deduped.values()
             ],
         )
     conn.commit()

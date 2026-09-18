@@ -32,10 +32,11 @@ inventory + meal period -> text query -> Ollama embedding -> pgvector
 5. Validates that JSON against a Pydantic schema (rejecting malformed
    output, enforcing `0.0 <= confidence <= 1.0`, and flagging
    low-confidence ingredients rather than silently dropping them).
-6. Upserts each detected ingredient into the `inventory` table in
-   PostgreSQL, keyed by case-insensitive name -- re-detecting an ingredient
-   updates its existing row rather than duplicating it (see "Known
-   limitations" below for what this does and doesn't handle).
+6. Normalizes each ingredient name (strips descriptive words like "red" or
+   "fresh") and upserts it into the `inventory` table in PostgreSQL, keyed
+   by that normalized name -- re-detecting an ingredient updates its
+   existing row rather than duplicating it (see "Known limitations" below
+   for what this does and doesn't handle).
 7. Prints the validated ingredient list, the full persisted inventory, and
    the current meal period (breakfast/lunch/snacks/dinner/other) computed
    deterministically from local system time -- not from the LLM.
@@ -314,9 +315,14 @@ that metadata; see limitations below).
   later photo (used up, thrown out), its row is simply never touched again
   -- nothing removes or expires it. A "last seen" timestamp already exists
   (`updated_at`) for a future staleness check; nothing acts on it yet.
-- **The model doesn't always merge duplicates within a single response**
-  either (e.g. "apple" and "red apple" as separate entries), despite the
-  prompt asking it to -- a model accuracy limitation, not a code bug.
+- **Descriptive words are stripped before matching, which can over-merge.**
+  The model alternates between e.g. "apple" and "red apple" for the same
+  fruit across runs, so `normalize_ingredient_name()` in
+  `inventory_service.py` strips a fixed list of color/ripeness/size words
+  before storing/matching a name. This correctly merges "apple"/"red
+  apple", but will also merge genuinely distinct items sharing a base word
+  -- e.g. "green onion" and "onion" become one row, losing a real
+  distinction. Edit `_DESCRIPTIVE_WORDS` if a specific case matters to you.
 - **`needs_confirmation` isn't always reliable from the model itself.**
   The Pydantic validator force-flags anything below
   `VISION_CONFIDENCE_THRESHOLD`, but it never un-flags something the model
