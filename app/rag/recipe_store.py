@@ -52,15 +52,29 @@ def count(conn) -> int:
         return cur.fetchone()[0]
 
 
-def insert_recipe(conn, *, external_id: str, name: str, image_name: str,
-                   ingredients: list[str], instructions: str, embedding: list[float]) -> None:
+def count_with_external_id_prefix(conn, prefix: str) -> int:
+    """Used by indexing scripts to check 'has this dataset already been loaded?'"""
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM recipes WHERE external_id LIKE %s;", (f"{prefix}%",))
+        return cur.fetchone()[0]
+
+
+def insert_recipe(conn, *, external_id: str, name: str, image_name: str | None,
+                   ingredients: list[str], instructions: str, embedding: list[float],
+                   cuisine: str | None = None, meal_type: str | None = None,
+                   servings: int | None = None, cooking_time_minutes: int | None = None,
+                   vegetarian: bool | None = None) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO recipes (external_id, name, image_name, ingredients, instructions, embedding)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO recipes (
+                external_id, name, image_name, ingredients, instructions, embedding,
+                cuisine, meal_type, servings, cooking_time_minutes, vegetarian
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (external_id, name, image_name, json.dumps(ingredients), instructions, embedding),
+            (external_id, name, image_name, json.dumps(ingredients), instructions, embedding,
+             cuisine, meal_type, servings, cooking_time_minutes, vegetarian),
         )
 
 

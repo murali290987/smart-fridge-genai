@@ -290,6 +290,42 @@ with conn.cursor() as cur:
 "
 ```
 
+## 11a. Second recipe dataset: Indian cuisine
+
+A second dataset adds 6,865 Indian recipes into the *same* `recipes`
+table, alongside the 1,000 from section 11. Place your copy at:
+
+```
+data/recipes/IndianFoodDatasetCSV.csv
+```
+
+(not committed to this repo, like the other dataset -- get your own copy;
+it's the commonly available "Indian Food 101" / Archana's Kitchen recipe
+CSV with columns `RecipeName, TranslatedRecipeName, Ingredients,
+TranslatedIngredients, PrepTimeInMins, CookTimeInMins, TotalTimeInMins,
+Servings, Cuisine, Course, Diet, Instructions, TranslatedInstructions,
+URL`).
+
+This dataset is richer than the first: it has real `Cuisine`, `Course`
+(meal type), `Servings`, `CookTimeInMins`, and `Diet` values, which
+populate the `cuisine` / `meal_type` / `servings` / `cooking_time_minutes`
+/ `vegetarian` columns that stayed `NULL` for every row from section 11.
+
+Build it (indexes the **full** dataset, not a subset -- at the ~17s/1,000
+rate measured in section 11, 6,865 recipes takes about 2.5 minutes; skips
+entirely if already indexed):
+
+```bash
+python scripts/build_indian_recipe_index.py
+```
+
+`vegetarian` is only set from unambiguous `Diet` values ("Vegetarian",
+"Vegan", "Eggetarian", "No Onion No Garlic (Sattvic)" -> true;
+"Non Vegeterian", "High Protein Non Vegetarian" -> false). Ambiguous
+labels like "Diabetic Friendly" or "Gluten Free" say nothing about meat
+content, so those are left `NULL` rather than guessed -- see
+`_infer_vegetarian()` in `scripts/build_indian_recipe_index.py`.
+
 ## 12. How recipe suggestions are built
 
 `app/rag/recipe_retriever.py` is the actual "Recipe RAG" piece:
@@ -334,11 +370,12 @@ that metadata; see limitations below).
   `VISION_CONFIDENCE_THRESHOLD`, but it never un-flags something the model
   already marked `true` at higher confidence -- over-flagging is the safe
   direction.
-- **The indexed recipes have no cuisine/meal-type/servings/vegetarian
-  metadata.** The source CSV doesn't include those fields, so the
-  `recipes` table has nullable columns for them, left empty for now rather
-  than guessed at -- recipe suggestions can't be filtered by diet or
-  cook-time yet, only ranked by embedding similarity.
+- **Cuisine/meal-type/servings/vegetarian metadata exists for only part
+  of the corpus.** The section 11 dataset lacks those fields entirely
+  (still `NULL` for those 1,000 rows); the section 11a dataset has them.
+  Either way, nothing in the retriever uses this metadata yet -- recipe
+  suggestions are ranked by embedding similarity only, not filtered by
+  diet or cook-time, even though the data to do so is now partly there.
 - **The retriever is retrieval-only, not a recommendation engine.** It
   finds the nearest recipes by vector distance; it doesn't check whether
   you actually have *all* the ingredients a recipe needs, weigh
